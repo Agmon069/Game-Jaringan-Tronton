@@ -213,6 +213,8 @@ namespace DiepMultiplayer
                 }
             }
 
+            TronExplosionVFX.SpawnCrash(transform.position, moveDirection, cycleNeonColor, 1.0f, false);
+
             // Hapus semua jejak cahaya milik player yang mati
             ClearAllTrails();
             currentHealth = 0;
