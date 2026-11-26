@@ -29,27 +29,27 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _BackfaceOpacity: 0.31
-    - _BaseAlpha: 0
-    - _BobAmplitude: 0.18
-    - _BobSpeed: 2.8
+    - _BackfaceOpacity: 0.33
+    - _BaseAlpha: 0.42
+    - _BobAmplitude: 0
+    - _BobSpeed: 0
     - _EmissionIntensity: 0.5
-    - _FlickerStrength: 0.08
-    - _FresnelIntensity: 1.9
-    - _FresnelPower: 2.6
-    - _GlitchFrequency: 2.5
-    - _GlitchIntensity: 0.025
-    - _GridScale: 17.9
-    - _GridStrength: 0.35
-    - _RotateSpeed: 1.6
-    - _ScanlineContrast: 0.55
+    - _FlickerStrength: 0.031
+    - _FresnelIntensity: 1.75
+    - _FresnelPower: 1.6
+    - _GlitchFrequency: 3
+    - _GlitchIntensity: 0.034
+    - _GridScale: 8.9
+    - _GridStrength: 0.01
+    - _RotateSpeed: 1
+    - _ScanlineContrast: 0.34
     - _ScanlineDensity: 5
     - _ScanlineSpeed: 4.5
-    - _SweepIntensity: 1.25
-    - _SweepSpeed: 0.65
+    - _SweepIntensity: 0.97
+    - _SweepSpeed: 0
     - _TiltAngle: 0
-    - _WireframeStrength: 2.21
-    - _WireframeWidth: 0.056
+    - _WireframeStrength: 2
+    - _WireframeWidth: 0.032
     m_Colors:
     - _Color: {r: 0, g: 0.95, b: 1, a: 1}
     - _RimColor: {r: 0.45, g: 1.8, b: 2.5, a: 1}
