@@ -28,6 +28,11 @@ namespace DiepMultiplayer
         [Header("Volume Settings")]
         [Range(0f, 1f)] public float bgmVolume = 0.45f;
         [Range(0f, 1f)] public float sfxVolume = 0.8f;
+        public bool isMuted = false;
+
+        private const string PrefBgmKey = "Tron_BGM_Volume";
+        private const string PrefSfxKey = "Tron_SFX_Volume";
+        private const string PrefMuteKey = "Tron_Audio_Muted";
 
         [Header("Audio Clips")]
         public AudioClip bgmLobbyClip;
@@ -81,10 +86,61 @@ namespace DiepMultiplayer
             _instance = this;
             DontDestroyOnLoad(gameObject);
 
+            LoadAudioSettings();
             SetupAudioSources();
             LoadOrGenerateClips();
 
             SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void LoadAudioSettings()
+        {
+            bgmVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(PrefBgmKey, 0.45f));
+            sfxVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(PrefSfxKey, 0.8f));
+            isMuted = PlayerPrefs.GetInt(PrefMuteKey, 0) == 1;
+        }
+
+        public void SetBgmVolume(float volume)
+        {
+            bgmVolume = Mathf.Clamp01(volume);
+            PlayerPrefs.SetFloat(PrefBgmKey, bgmVolume);
+            PlayerPrefs.Save();
+            ApplyAudioVolumes();
+        }
+
+        public void SetSfxVolume(float volume)
+        {
+            sfxVolume = Mathf.Clamp01(volume);
+            PlayerPrefs.SetFloat(PrefSfxKey, sfxVolume);
+            PlayerPrefs.Save();
+            ApplyAudioVolumes();
+        }
+
+        public void SetMuted(bool muted)
+        {
+            isMuted = muted;
+            PlayerPrefs.SetInt(PrefMuteKey, muted ? 1 : 0);
+            PlayerPrefs.Save();
+            ApplyAudioVolumes();
+        }
+
+        public void ApplyAudioVolumes()
+        {
+            if (bgmSource != null)
+            {
+                bgmSource.mute = isMuted;
+                bgmSource.volume = isMuted ? 0f : bgmVolume;
+            }
+            if (sfxSource != null)
+            {
+                sfxSource.mute = isMuted;
+                sfxSource.volume = isMuted ? 0f : 1f;
+            }
+            if (shootSource != null)
+            {
+                shootSource.mute = isMuted;
+                shootSource.volume = isMuted ? 0f : 0.75f;
+            }
         }
 
         private void Start()
@@ -126,6 +182,8 @@ namespace DiepMultiplayer
                 shootSource.playOnAwake = false;
                 shootSource.volume = sfxVolume * 0.7f;
             }
+
+            ApplyAudioVolumes();
         }
 
         private void LoadOrGenerateClips()
@@ -182,11 +240,12 @@ namespace DiepMultiplayer
             if (targetBgm != null && bgmSource.clip != targetBgm)
             {
                 bgmSource.clip = targetBgm;
-                bgmSource.volume = bgmVolume;
+                ApplyAudioVolumes();
                 bgmSource.Play();
             }
             else if (targetBgm != null && !bgmSource.isPlaying)
             {
+                ApplyAudioVolumes();
                 bgmSource.Play();
             }
         }

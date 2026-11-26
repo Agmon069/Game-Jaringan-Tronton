@@ -42,6 +42,7 @@ namespace DiepMultiplayer.Editor
             GameObject powerUpPrefab = CreatePowerUpPrefab();
             GameObject playerTankPrefab = CreatePlayerCyclePrefab(playerMat, chassisMat, shieldMat, bulletPrefab);
             GameObject botTankPrefab = CreateBotCyclePrefab(botMat, chassisMat, shieldMat, bulletPrefab);
+            CreateOptionsOverlayPrefab();
 
             CreateGameScene(groundMat, wallMat, ammoOrbPrefab, powerUpPrefab);
             AddSceneToBuildSettings("Assets/Scenes/GameScene.unity");
@@ -56,8 +57,30 @@ namespace DiepMultiplayer.Editor
 
             if (showDialog && !Application.isBatchMode)
             {
-                EditorUtility.DisplayDialog("Sukses!", "Scene 'GameScene' dan semua Prefab Tron Light Cycle berhasil diperbarui dan siap dimainkan!", "OK");
+                EditorUtility.DisplayDialog("Sukses!", "Scene 'GameScene' dan semua Prefab Tron Car (Car Blue & Car Red) berhasil diperbarui dan siap dimainkan!", "OK");
             }
+        }
+
+        public static void SetupCarPrefabsOnly()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                return;
+
+            EnsureDirectories();
+            Material playerMat = CreateOrGetMaterial("Assets/Materials/TankPlayer.mat", new Color(0.0f, 0.95f, 1.0f), true);
+            Material botMat = CreateOrGetMaterial("Assets/Materials/TankBot.mat", new Color(1.0f, 0.32f, 0.0f), true);
+            Material chassisMat = CreateOrGetMaterial("Assets/Materials/TronCycleChassis.mat", new Color(0.07f, 0.08f, 0.12f));
+            Material shieldMat = CreateOrGetMaterial("Assets/Materials/TankShield.mat", new Color(1.0f, 0.9f, 0.1f, 0.35f), true);
+            Material bulletMat = CreateOrGetMaterial("Assets/Materials/BulletMat.mat", new Color(0.0f, 0.95f, 1.0f), true);
+
+            GameObject bulletPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Resources/BulletPrefab.prefab");
+            if (bulletPrefab == null) bulletPrefab = CreateBulletPrefab(bulletMat);
+
+            CreatePlayerCyclePrefab(playerMat, chassisMat, shieldMat, bulletPrefab);
+            CreateBotCyclePrefab(botMat, chassisMat, shieldMat, bulletPrefab);
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
         }
 
         private static void EnsureDirectories()
@@ -163,6 +186,186 @@ namespace DiepMultiplayer.Editor
             return prefab;
         }
 
+        private static void BuildTronCarOrFallbackVisual(GameObject root, string carAssetPath, Material fallbackNeonMat, Material fallbackChassisMat)
+        {
+            GameObject carAsset = AssetDatabase.LoadAssetAtPath<GameObject>(carAssetPath);
+            if (carAsset == null)
+            {
+                Debug.LogWarning($"[Tron Game] Asset 3D tidak ditemukan di '{carAssetPath}', menggunakan visual fallback.");
+                BuildTronCycleVisualHierarchy(root, fallbackNeonMat, fallbackChassisMat);
+                return;
+            }
+
+            GameObject visualRoot = new GameObject("TronCycleVisual");
+            visualRoot.transform.SetParent(root.transform, false);
+            visualRoot.transform.localPosition = Vector3.zero;
+            visualRoot.transform.localRotation = Quaternion.identity;
+            visualRoot.transform.localScale = Vector3.one;
+
+            GameObject carObj = (GameObject)PrefabUtility.InstantiatePrefab(carAsset);
+            if (carObj == null)
+            {
+                carObj = Object.Instantiate(carAsset);
+            }
+            carObj.name = "CarModel";
+            carObj.transform.SetParent(visualRoot.transform, false);
+            carObj.transform.localPosition = Vector3.zero;
+            carObj.transform.localRotation = Quaternion.identity;
+            carObj.transform.localScale = Vector3.one;
+
+            foreach (var col in carObj.GetComponentsInChildren<Collider>(true))
+            {
+                DestroyImmediate(col);
+            }
+            foreach (var anim in carObj.GetComponentsInChildren<Animator>(true))
+            {
+                if (anim.runtimeAnimatorController == null)
+                {
+                    DestroyImmediate(anim);
+                }
+            }
+
+            AlignAndNormalizeCarModel(carObj, 2.8f);
+        }
+
+        private static void AlignAndNormalizeCarModel(GameObject carObj, float targetLength)
+        {
+            // 1. Align forward direction (+Z) using "Ban Depan" and "Ban Belakang" meshes if present
+            MeshFilter[] meshFilters = carObj.GetComponentsInChildren<MeshFilter>(true);
+            Vector3 frontSum = Vector3.zero;
+            int frontCount = 0;
+            Vector3 rearSum = Vector3.zero;
+            int rearCount = 0;
+
+            foreach (var mf in meshFilters)
+            {
+                if (mf == null || mf.sharedMesh == null) continue;
+                string lowerName = mf.gameObject.name.ToLowerInvariant();
+                Vector3 worldCenter = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
+
+                if (lowerName.Contains("depan"))
+                {
+                    frontSum += worldCenter;
+                    frontCount++;
+                }
+                else if (lowerName.Contains("belakang"))
+                {
+                    rearSum += worldCenter;
+                    rearCount++;
+                }
+            }
+
+            if (frontCount > 0 && rearCount > 0)
+            {
+                Vector3 frontCenter = frontSum / frontCount;
+                Vector3 rearCenter = rearSum / rearCount;
+                Vector3 forwardVec = frontCenter - rearCenter;
+
+                // Ensure the forward axis lies in the XZ plane first if model came in vertically
+                if (Mathf.Abs(forwardVec.y) > Mathf.Max(Mathf.Abs(forwardVec.x), Mathf.Abs(forwardVec.z)))
+                {
+                    Quaternion uprightRot = Quaternion.FromToRotation(forwardVec.normalized, Vector3.forward);
+                    carObj.transform.rotation = uprightRot * carObj.transform.rotation;
+
+                    // Re-evaluate wheel positions after upright rotation
+                    frontSum = Vector3.zero;
+                    rearSum = Vector3.zero;
+                    foreach (var mf in meshFilters)
+                    {
+                        if (mf == null || mf.sharedMesh == null) continue;
+                        string lowerName = mf.gameObject.name.ToLowerInvariant();
+                        Vector3 worldCenter = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
+                        if (lowerName.Contains("depan")) frontSum += worldCenter;
+                        else if (lowerName.Contains("belakang")) rearSum += worldCenter;
+                    }
+                    forwardVec = (frontSum / frontCount) - (rearSum / rearCount);
+                }
+
+                forwardVec.y = 0f;
+                if (forwardVec.sqrMagnitude > 0.0001f)
+                {
+                    Quaternion yawRot = Quaternion.FromToRotation(forwardVec.normalized, Vector3.forward);
+                    carObj.transform.rotation = yawRot * carObj.transform.rotation;
+                }
+            }
+
+            // 2. Ensure wheels sit below the body (upright +Y)
+            if (TryCalculateCarMeshBounds(carObj, out Bounds preScaleBounds))
+            {
+                float wheelYSum = 0f;
+                int wheelCount = 0;
+                foreach (var mf in meshFilters)
+                {
+                    if (mf == null || mf.sharedMesh == null) continue;
+                    if (mf.gameObject.name.ToLowerInvariant().Contains("ban"))
+                    {
+                        wheelYSum += mf.transform.TransformPoint(mf.sharedMesh.bounds.center).y;
+                        wheelCount++;
+                    }
+                }
+                if (wheelCount > 0 && (wheelYSum / wheelCount) > preScaleBounds.center.y)
+                {
+                    carObj.transform.rotation = Quaternion.Euler(0f, 0f, 180f) * carObj.transform.rotation;
+                    TryCalculateCarMeshBounds(carObj, out preScaleBounds);
+                }
+
+                // 3. Uniformly scale so car length along +Z matches targetLength
+                float currentLength = preScaleBounds.size.z;
+                if (currentLength < 0.01f) currentLength = Mathf.Max(preScaleBounds.size.x, preScaleBounds.size.y, 0.01f);
+                float uniformScale = targetLength / currentLength;
+                carObj.transform.localScale *= uniformScale;
+
+                // 4. Center horizontally and rest bottom of tires on ground (root spawns at y = 0.5)
+                if (TryCalculateCarMeshBounds(carObj, out Bounds finalBounds))
+                {
+                    Vector3 offset = new Vector3(
+                        -finalBounds.center.x,
+                        -0.48f - finalBounds.min.y,
+                        -finalBounds.center.z
+                    );
+                    carObj.transform.position += offset;
+                }
+            }
+        }
+
+        private static bool TryCalculateCarMeshBounds(GameObject rootObj, out Bounds combinedBounds)
+        {
+            combinedBounds = new Bounds();
+            bool hasBounds = false;
+
+            MeshFilter[] filters = rootObj.GetComponentsInChildren<MeshFilter>(true);
+            foreach (var mf in filters)
+            {
+                if (mf == null || mf.sharedMesh == null) continue;
+                Bounds localB = mf.sharedMesh.bounds;
+                Vector3 c = localB.center;
+                Vector3 e = localB.extents;
+                Matrix4x4 m = mf.transform.localToWorldMatrix;
+
+                for (int sx = -1; sx <= 1; sx += 2)
+                {
+                    for (int sy = -1; sy <= 1; sy += 2)
+                    {
+                        for (int sz = -1; sz <= 1; sz += 2)
+                        {
+                            Vector3 worldCorner = m.MultiplyPoint3x4(c + new Vector3(e.x * sx, e.y * sy, e.z * sz));
+                            if (!hasBounds)
+                            {
+                                combinedBounds = new Bounds(worldCorner, Vector3.zero);
+                                hasBounds = true;
+                            }
+                            else
+                            {
+                                combinedBounds.Encapsulate(worldCorner);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return hasBounds;
+        }
+
         private static void BuildTronCycleVisualHierarchy(GameObject root, Material neonMat, Material chassisMat)
         {
             GameObject visualRoot = new GameObject("TronCycleVisual");
@@ -241,15 +444,15 @@ namespace DiepMultiplayer.Editor
 
             pv.ObservedComponents = new List<Component> { ptv, ctrl };
 
-            // Build Tron Light Cycle Visual
-            BuildTronCycleVisualHierarchy(root, neonMat, chassisMat);
+            // Build Tron 3D Car Visual (Assets/3D/Car Blue.fbx)
+            BuildTronCarOrFallbackVisual(root, "Assets/3D/Car Blue.fbx", neonMat, chassisMat);
 
             // Shield Bubble
             GameObject shield = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             shield.name = "ShieldBubble";
             shield.transform.SetParent(root.transform);
-            shield.transform.localPosition = new Vector3(0f, 0.3f, 0f);
-            shield.transform.localScale = new Vector3(2.1f, 2.0f, 3.0f);
+            shield.transform.localPosition = new Vector3(0f, -0.1f, 0f);
+            shield.transform.localScale = new Vector3(2.2f, 1.8f, 3.4f);
             shield.GetComponent<MeshRenderer>().sharedMaterial = shieldMat;
             DestroyImmediate(shield.GetComponent<Collider>());
             ctrl.shieldBubble = shield;
@@ -287,15 +490,15 @@ namespace DiepMultiplayer.Editor
 
             pv.ObservedComponents = new List<Component> { ptv, ctrl };
 
-            // Build Tron Light Cycle Visual
-            BuildTronCycleVisualHierarchy(root, neonMat, chassisMat);
+            // Build Tron 3D Car Visual (Assets/3D/Car Red.fbx)
+            BuildTronCarOrFallbackVisual(root, "Assets/3D/Car Red.fbx", neonMat, chassisMat);
 
             // Shield Bubble
             GameObject shield = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             shield.name = "ShieldBubble";
             shield.transform.SetParent(root.transform);
-            shield.transform.localPosition = new Vector3(0f, 0.3f, 0f);
-            shield.transform.localScale = new Vector3(2.1f, 2.0f, 3.0f);
+            shield.transform.localPosition = new Vector3(0f, -0.1f, 0f);
+            shield.transform.localScale = new Vector3(2.2f, 1.8f, 3.4f);
             shield.GetComponent<MeshRenderer>().sharedMaterial = shieldMat;
             DestroyImmediate(shield.GetComponent<Collider>());
             ctrl.shieldBubble = shield;
@@ -415,7 +618,10 @@ namespace DiepMultiplayer.Editor
             GameObject canvasObj = new GameObject("HUDCanvas");
             Canvas canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObj.AddComponent<CanvasScaler>();
+            CanvasScaler hudScaler = canvasObj.AddComponent<CanvasScaler>();
+            hudScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            hudScaler.referenceResolution = new Vector2(1920f, 1080f);
+            hudScaler.matchWidthOrHeight = 0.5f;
             canvasObj.AddComponent<GraphicRaycaster>();
 
             SetupSceneUI(canvasObj, out GameManager gm);
@@ -586,8 +792,354 @@ namespace DiepMultiplayer.Editor
             SetupGameOverModal(canvasObj, gm);
         }
 
+        private static Sprite LoadUISprite(string path)
+        {
+            Sprite sp = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+            if (sp != null) return sp;
+
+            Object[] subAssets = AssetDatabase.LoadAllAssetsAtPath(path);
+            if (subAssets != null)
+            {
+                foreach (var obj in subAssets)
+                {
+                    if (obj is Sprite s) return s;
+                }
+            }
+            return null;
+        }
+
+        private static GameObject CreateOptionsOverlayPrefab()
+        {
+            string path = "Assets/Resources/OptionsOverlayPrefab.prefab";
+
+            Sprite panelFrameSprite = LoadUISprite("Assets/UI/UI-cyber- gede(ga make glowing.png");
+            Sprite settingSprite = LoadUISprite("Assets/UI/UI-cyber-setting.png");
+            Sprite exitSprite = LoadUISprite("Assets/UI/UI-cyber-exit.png");
+            Sprite longBtnSprite = LoadUISprite("Assets/UI/UI-cyber-panjang.png");
+            Sprite squareSprite = LoadUISprite("Assets/UI/UI-cyber-kotak.png");
+
+            GameObject canvasObj = new GameObject("OptionsOverlayCanvas");
+            Canvas canvas = canvasObj.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 200;
+
+            CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            canvasObj.AddComponent<GraphicRaycaster>();
+            OptionsPanelUI optUI = canvasObj.AddComponent<OptionsPanelUI>();
+
+            // 1. Lobby Top-Right Option Button (hidden automatically in GameScene)
+            GameObject lobbyBtnObj = new GameObject("LobbyOptionButton", typeof(RectTransform));
+            lobbyBtnObj.transform.SetParent(canvasObj.transform, false);
+            RectTransform lbrt = lobbyBtnObj.GetComponent<RectTransform>();
+            lbrt.anchorMin = new Vector2(1f, 1f);
+            lbrt.anchorMax = new Vector2(1f, 1f);
+            lbrt.pivot = new Vector2(1f, 1f);
+            lbrt.anchoredPosition = new Vector2(-36f, -32f);
+            lbrt.sizeDelta = new Vector2(96f, 96f);
+
+            Image lobbyBtnImg = lobbyBtnObj.AddComponent<Image>();
+            if (settingSprite != null)
+            {
+                lobbyBtnImg.sprite = settingSprite;
+                lobbyBtnImg.preserveAspect = true;
+            }
+            else
+            {
+                lobbyBtnImg.color = new Color(0.08f, 0.25f, 0.45f, 0.95f);
+            }
+            Button lobbyBtn = lobbyBtnObj.AddComponent<Button>();
+            optUI.lobbyOptionButton = lobbyBtn;
+
+            GameObject lobbyLblObj = new GameObject("Label", typeof(RectTransform));
+            lobbyLblObj.transform.SetParent(lobbyBtnObj.transform, false);
+            TextMeshProUGUI lobbyLbl = lobbyLblObj.AddComponent<TextMeshProUGUI>();
+            lobbyLbl.text = "OPTION";
+            lobbyLbl.fontSize = 18f;
+            lobbyLbl.fontStyle = FontStyles.Bold;
+            lobbyLbl.color = Color.white;
+            lobbyLbl.alignment = TextAlignmentOptions.Center;
+            RectTransform llrt = lobbyLblObj.GetComponent<RectTransform>();
+            llrt.anchorMin = new Vector2(0.5f, 0f);
+            llrt.anchorMax = new Vector2(0.5f, 0f);
+            llrt.pivot = new Vector2(0.5f, 1f);
+            llrt.anchoredPosition = new Vector2(0f, -4f);
+            llrt.sizeDelta = new Vector2(130f, 28f);
+
+            // 2. Backdrop
+            GameObject backdropObj = new GameObject("OptionsBackdrop", typeof(RectTransform));
+            backdropObj.transform.SetParent(canvasObj.transform, false);
+            RectTransform bdrt = backdropObj.GetComponent<RectTransform>();
+            bdrt.anchorMin = Vector2.zero;
+            bdrt.anchorMax = Vector2.one;
+            bdrt.sizeDelta = Vector2.zero;
+            Image bdImg = backdropObj.AddComponent<Image>();
+            bdImg.color = new Color(0.01f, 0.02f, 0.05f, 0.72f);
+            optUI.optionsBackdrop = backdropObj;
+
+            // 3. Main Options Modal Frame
+            GameObject modalObj = new GameObject("OptionsModal", typeof(RectTransform));
+            modalObj.transform.SetParent(backdropObj.transform, false);
+            RectTransform mrt = modalObj.GetComponent<RectTransform>();
+            mrt.anchorMin = new Vector2(0.5f, 0.5f);
+            mrt.anchorMax = new Vector2(0.5f, 0.5f);
+            mrt.pivot = new Vector2(0.5f, 0.5f);
+            mrt.anchoredPosition = Vector2.zero;
+            mrt.sizeDelta = new Vector2(900f, 636f);
+
+            Image modalImg = modalObj.AddComponent<Image>();
+            if (panelFrameSprite != null)
+            {
+                modalImg.sprite = panelFrameSprite;
+                modalImg.preserveAspect = true;
+            }
+            else
+            {
+                modalImg.color = new Color(0.05f, 0.07f, 0.14f, 0.96f);
+            }
+            optUI.optionsPanel = modalObj;
+
+            // Title
+            GameObject titleObj = new GameObject("TitleText", typeof(RectTransform));
+            titleObj.transform.SetParent(modalObj.transform, false);
+            TextMeshProUGUI titleTMP = titleObj.AddComponent<TextMeshProUGUI>();
+            titleTMP.text = "OPTIONS";
+            titleTMP.fontSize = 44f;
+            titleTMP.fontStyle = FontStyles.Bold;
+            titleTMP.color = new Color(0f, 0.95f, 1f);
+            titleTMP.alignment = TextAlignmentOptions.Center;
+            RectTransform trt = titleObj.GetComponent<RectTransform>();
+            trt.anchoredPosition = new Vector2(0f, 152f);
+            trt.sizeDelta = new Vector2(520f, 60f);
+
+            // Top-Right Close Button (UI-cyber-exit)
+            GameObject closeObj = new GameObject("CloseButton", typeof(RectTransform));
+            closeObj.transform.SetParent(modalObj.transform, false);
+            RectTransform clrt = closeObj.GetComponent<RectTransform>();
+            clrt.anchoredPosition = new Vector2(315f, 152f);
+            clrt.sizeDelta = new Vector2(68f, 68f);
+            Image closeImg = closeObj.AddComponent<Image>();
+            if (exitSprite != null)
+            {
+                closeImg.sprite = exitSprite;
+                closeImg.preserveAspect = true;
+            }
+            else
+            {
+                closeImg.color = new Color(0.85f, 0.25f, 0.2f);
+            }
+            optUI.closeButton = closeObj.AddComponent<Button>();
+
+            // Row 1: BGM Slider
+            CreateOptionSliderRow(modalObj.transform, "BGMRow", new Vector2(0f, 74f), "MUSIK (BGM)", squareSprite, out Slider bgmSlider, out TMP_Text bgmValText);
+            optUI.bgmSlider = bgmSlider;
+            optUI.bgmValueText = bgmValText;
+
+            // Row 2: SFX Slider
+            CreateOptionSliderRow(modalObj.transform, "SFXRow", new Vector2(0f, 12f), "EFEK SUARA", squareSprite, out Slider sfxSlider, out TMP_Text sfxValText);
+            optUI.sfxSlider = sfxSlider;
+            optUI.sfxValueText = sfxValText;
+
+            // Row 3: Mute Toggle Button
+            GameObject muteLabelObj = new GameObject("MuteLabel", typeof(RectTransform));
+            muteLabelObj.transform.SetParent(modalObj.transform, false);
+            TextMeshProUGUI muteLbl = muteLabelObj.AddComponent<TextMeshProUGUI>();
+            muteLbl.text = "SUARA GAME";
+            muteLbl.fontSize = 23f;
+            muteLbl.fontStyle = FontStyles.Bold;
+            muteLbl.color = Color.white;
+            muteLbl.alignment = TextAlignmentOptions.Left;
+            RectTransform mlrt = muteLabelObj.GetComponent<RectTransform>();
+            mlrt.anchoredPosition = new Vector2(-190f, -52f);
+            mlrt.sizeDelta = new Vector2(240f, 40f);
+
+            Button muteBtn = CreateCyberPillButton(modalObj.transform, "MuteButton", new Vector2(105f, -52f), new Vector2(290f, 80f), longBtnSprite, null, "AUDIO: AKTIF", 21f, out TMP_Text muteBtnTxt);
+            optUI.muteButton = muteBtn;
+            optUI.muteButtonText = muteBtnTxt;
+
+            // Row 4: Fullscreen + Save & Close Buttons
+            Button fsBtn = CreateCyberPillButton(modalObj.transform, "FullscreenButton", new Vector2(-155f, -135f), new Vector2(280f, 84f), longBtnSprite, null, "LAYAR: FULLSCREEN", 20f, out TMP_Text fsBtnTxt);
+            optUI.fullscreenButton = fsBtn;
+            optUI.fullscreenButtonText = fsBtnTxt;
+
+            Button saveBtn = CreateCyberPillButton(modalObj.transform, "SaveCloseButton", new Vector2(155f, -135f), new Vector2(280f, 84f), longBtnSprite, null, "SIMPAN & TUTUP", 20f, out _);
+            optUI.saveCloseButton = saveBtn;
+
+            backdropObj.SetActive(false);
+
+            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(canvasObj, path);
+            DestroyImmediate(canvasObj);
+            return prefab;
+        }
+
+        private static void CreateOptionSliderRow(Transform parent, string name, Vector2 pos, string label, Sprite handleSprite, out Slider slider, out TMP_Text valueTMP)
+        {
+            GameObject row = new GameObject(name, typeof(RectTransform));
+            row.transform.SetParent(parent, false);
+            RectTransform rrt = row.GetComponent<RectTransform>();
+            rrt.anchoredPosition = pos;
+            rrt.sizeDelta = new Vector2(660f, 48f);
+
+            GameObject lblObj = new GameObject("Label", typeof(RectTransform));
+            lblObj.transform.SetParent(row.transform, false);
+            TextMeshProUGUI lbl = lblObj.AddComponent<TextMeshProUGUI>();
+            lbl.text = label;
+            lbl.fontSize = 23f;
+            lbl.fontStyle = FontStyles.Bold;
+            lbl.color = Color.white;
+            lbl.alignment = TextAlignmentOptions.Left;
+            RectTransform lrt = lblObj.GetComponent<RectTransform>();
+            lrt.anchoredPosition = new Vector2(-200f, 0f);
+            lrt.sizeDelta = new Vector2(230f, 40f);
+
+            GameObject sliderObj = new GameObject("Slider", typeof(RectTransform));
+            sliderObj.transform.SetParent(row.transform, false);
+            RectTransform srt = sliderObj.GetComponent<RectTransform>();
+            srt.anchoredPosition = new Vector2(65f, 0f);
+            srt.sizeDelta = new Vector2(270f, 24f);
+
+            slider = sliderObj.AddComponent<Slider>();
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.value = 0.5f;
+
+            // Track Background
+            GameObject bgObj = new GameObject("Background", typeof(RectTransform));
+            bgObj.transform.SetParent(sliderObj.transform, false);
+            Image bgImg = bgObj.AddComponent<Image>();
+            bgImg.color = new Color(0.06f, 0.1f, 0.2f, 0.95f);
+            RectTransform bgrt = bgObj.GetComponent<RectTransform>();
+            bgrt.anchorMin = Vector2.zero;
+            bgrt.anchorMax = Vector2.one;
+            bgrt.sizeDelta = Vector2.zero;
+
+            // Fill Area
+            GameObject fillArea = new GameObject("Fill Area", typeof(RectTransform));
+            fillArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform fart = fillArea.GetComponent<RectTransform>();
+            fart.anchorMin = Vector2.zero;
+            fart.anchorMax = Vector2.one;
+            fart.sizeDelta = Vector2.zero;
+
+            GameObject fillObj = new GameObject("Fill", typeof(RectTransform));
+            fillObj.transform.SetParent(fillArea.transform, false);
+            Image fillImg = fillObj.AddComponent<Image>();
+            fillImg.color = new Color(0f, 0.88f, 1f);
+            RectTransform frt = fillObj.GetComponent<RectTransform>();
+            frt.anchorMin = Vector2.zero;
+            frt.anchorMax = Vector2.one;
+            frt.sizeDelta = Vector2.zero;
+            slider.fillRect = frt;
+
+            // Handle Slide Area
+            GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
+            handleArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform hart = handleArea.GetComponent<RectTransform>();
+            hart.anchorMin = Vector2.zero;
+            hart.anchorMax = Vector2.one;
+            hart.sizeDelta = Vector2.zero;
+
+            GameObject handleObj = new GameObject("Handle", typeof(RectTransform));
+            handleObj.transform.SetParent(handleArea.transform, false);
+            Image handleImg = handleObj.AddComponent<Image>();
+            if (handleSprite != null)
+            {
+                handleImg.sprite = handleSprite;
+                handleImg.preserveAspect = true;
+            }
+            else
+            {
+                handleImg.color = Color.white;
+            }
+            RectTransform hrt = handleObj.GetComponent<RectTransform>();
+            hrt.sizeDelta = new Vector2(34f, 34f);
+            slider.handleRect = hrt;
+            slider.targetGraphic = handleImg;
+
+            // Value Percentage Text
+            GameObject valObj = new GameObject("ValueText", typeof(RectTransform));
+            valObj.transform.SetParent(row.transform, false);
+            valueTMP = valObj.AddComponent<TextMeshProUGUI>();
+            valueTMP.text = "50%";
+            valueTMP.fontSize = 22f;
+            valueTMP.fontStyle = FontStyles.Bold;
+            valueTMP.color = new Color(0f, 0.95f, 1f);
+            valueTMP.alignment = TextAlignmentOptions.Right;
+            RectTransform vrt = valObj.GetComponent<RectTransform>();
+            vrt.anchoredPosition = new Vector2(255f, 0f);
+            vrt.sizeDelta = new Vector2(85f, 40f);
+        }
+
+        private static Button CreateCyberPillButton(Transform parent, string name, Vector2 anchoredPos, Vector2 size, Sprite bgSprite, Sprite iconSprite, string label, float fontSize, out TMP_Text labelTMP)
+        {
+            GameObject btnObj = new GameObject(name, typeof(RectTransform));
+            btnObj.transform.SetParent(parent, false);
+            RectTransform brt = btnObj.GetComponent<RectTransform>();
+            brt.anchoredPosition = anchoredPos;
+            brt.sizeDelta = size;
+
+            Image bgImg = btnObj.AddComponent<Image>();
+            if (bgSprite != null)
+            {
+                bgImg.sprite = bgSprite;
+                bgImg.preserveAspect = true;
+            }
+            else
+            {
+                bgImg.color = new Color(0.08f, 0.25f, 0.45f);
+            }
+
+            Button btn = btnObj.AddComponent<Button>();
+
+            if (iconSprite != null)
+            {
+                GameObject iconObj = new GameObject("Icon", typeof(RectTransform));
+                iconObj.transform.SetParent(btnObj.transform, false);
+                Image iconImg = iconObj.AddComponent<Image>();
+                iconImg.sprite = iconSprite;
+                iconImg.preserveAspect = true;
+                iconImg.raycastTarget = false;
+                RectTransform irt = iconObj.GetComponent<RectTransform>();
+                irt.anchorMin = new Vector2(0f, 0.5f);
+                irt.anchorMax = new Vector2(0f, 0.5f);
+                irt.pivot = new Vector2(0.5f, 0.5f);
+                irt.anchoredPosition = new Vector2(size.y * 0.55f, 0f);
+                irt.sizeDelta = new Vector2(size.y * 0.52f, size.y * 0.52f);
+            }
+
+            GameObject txtObj = new GameObject("LabelText", typeof(RectTransform));
+            txtObj.transform.SetParent(btnObj.transform, false);
+            labelTMP = txtObj.AddComponent<TextMeshProUGUI>();
+            labelTMP.text = label;
+            labelTMP.fontSize = fontSize;
+            labelTMP.fontStyle = FontStyles.Bold;
+            labelTMP.color = Color.white;
+            labelTMP.alignment = TextAlignmentOptions.Center;
+            labelTMP.textWrappingMode = TextWrappingModes.NoWrap;
+            labelTMP.overflowMode = TextOverflowModes.Overflow;
+            labelTMP.raycastTarget = false;
+
+            RectTransform trt = txtObj.GetComponent<RectTransform>();
+            trt.anchorMin = Vector2.zero;
+            trt.anchorMax = Vector2.one;
+            trt.pivot = new Vector2(0.5f, 0.5f);
+            trt.offsetMin = new Vector2(iconSprite != null ? size.y * 0.72f : 12f, 4f);
+            trt.offsetMax = new Vector2(-12f, -4f);
+
+            return btn;
+        }
+
         private static void SetupGameOverModal(GameObject canvasObj, GameManager gm)
         {
+            Sprite panelFrameSprite = LoadUISprite("Assets/UI/UI-cyber- gede(ga make glowing.png");
+            Sprite longBtnSprite = LoadUISprite("Assets/UI/UI-cyber-panjang.png");
+            Sprite restartSprite = LoadUISprite("Assets/UI/UI-cyber-restart.png");
+            Sprite exitSprite = LoadUISprite("Assets/UI/UI-cyber-exit.png");
+            Sprite settingSprite = LoadUISprite("Assets/UI/UI-cyber-setting.png");
+
             GameObject goPanel = new GameObject("GameOverModal");
             goPanel.transform.SetParent(canvasObj.transform, false);
             RectTransform gort = goPanel.AddComponent<RectTransform>();
@@ -595,10 +1147,18 @@ namespace DiepMultiplayer.Editor
             gort.anchorMax = new Vector2(0.5f, 0.5f);
             gort.pivot = new Vector2(0.5f, 0.5f);
             gort.anchoredPosition = Vector2.zero;
-            gort.sizeDelta = new Vector2(580, 440);
+            gort.sizeDelta = new Vector2(900f, 636f);
 
             Image goBg = goPanel.AddComponent<Image>();
-            goBg.color = new Color(0.05f, 0.07f, 0.12f, 0.96f);
+            if (panelFrameSprite != null)
+            {
+                goBg.sprite = panelFrameSprite;
+                goBg.preserveAspect = true;
+            }
+            else
+            {
+                goBg.color = new Color(0.05f, 0.07f, 0.12f, 0.96f);
+            }
 
             GameOverUI goUI = goPanel.AddComponent<GameOverUI>();
             goUI.panel = goPanel;
@@ -609,13 +1169,13 @@ namespace DiepMultiplayer.Editor
             titleObj.transform.SetParent(goPanel.transform, false);
             TextMeshProUGUI titleTMP = titleObj.AddComponent<TextMeshProUGUI>();
             titleTMP.text = "GAME OVER";
-            titleTMP.fontSize = 48;
+            titleTMP.fontSize = 48f;
             titleTMP.fontStyle = FontStyles.Bold;
             titleTMP.color = new Color(1f, 0.25f, 0.2f);
             titleTMP.alignment = TextAlignmentOptions.Center;
             RectTransform trt = titleObj.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(0, 145);
-            trt.sizeDelta = new Vector2(520, 65);
+            trt.anchoredPosition = new Vector2(0f, 148f);
+            trt.sizeDelta = new Vector2(580f, 60f);
             goUI.titleText = titleTMP;
 
             // Killer Text
@@ -623,12 +1183,12 @@ namespace DiepMultiplayer.Editor
             killerObj.transform.SetParent(goPanel.transform, false);
             TextMeshProUGUI killerTMP = killerObj.AddComponent<TextMeshProUGUI>();
             killerTMP.text = "Dikalahkan oleh: Tron Bot";
-            killerTMP.fontSize = 26;
+            killerTMP.fontSize = 25f;
             killerTMP.color = Color.white;
             killerTMP.alignment = TextAlignmentOptions.Center;
             RectTransform krt = killerObj.GetComponent<RectTransform>();
-            krt.anchoredPosition = new Vector2(0, 70);
-            krt.sizeDelta = new Vector2(520, 45);
+            krt.anchoredPosition = new Vector2(0f, 84f);
+            krt.sizeDelta = new Vector2(600f, 42f);
             goUI.killerText = killerTMP;
 
             // Stats Text
@@ -636,73 +1196,24 @@ namespace DiepMultiplayer.Editor
             statsObj.transform.SetParent(goPanel.transform, false);
             TextMeshProUGUI statsTMP = statsObj.AddComponent<TextMeshProUGUI>();
             statsTMP.text = "Total Kills: 0";
-            statsTMP.fontSize = 24;
+            statsTMP.fontSize = 23f;
             statsTMP.color = new Color(0.0f, 0.95f, 1.0f);
             statsTMP.alignment = TextAlignmentOptions.Center;
             RectTransform srt = statsObj.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(0, 20);
-            srt.sizeDelta = new Vector2(520, 40);
+            srt.anchoredPosition = new Vector2(0f, 40f);
+            srt.sizeDelta = new Vector2(580f, 38f);
             goUI.statsText = statsTMP;
 
-            // Respawn Button
-            GameObject respawnBtnObj = new GameObject("RespawnButton");
-            respawnBtnObj.transform.SetParent(goPanel.transform, false);
-            Image rImg = respawnBtnObj.AddComponent<Image>();
-            rImg.color = new Color(0.0f, 0.7f, 0.85f);
-            Button rBtn = respawnBtnObj.AddComponent<Button>();
-            RectTransform rrt = respawnBtnObj.GetComponent<RectTransform>();
-            rrt.anchoredPosition = new Vector2(0, -55);
-            rrt.sizeDelta = new Vector2(380, 58);
+            // Row 1 Buttons: RESTART (Left) + MAIN MENU (Right) using UI-cyber-panjang & icons
+            Button rBtn = CreateCyberPillButton(goPanel.transform, "RespawnButton", new Vector2(-158f, -34f), new Vector2(290f, 94f), longBtnSprite, restartSprite, "RESTART", 22f, out _);
             goUI.respawnButton = rBtn;
 
-            GameObject rTxtObj = new GameObject("RespawnBtnText");
-            rTxtObj.transform.SetParent(respawnBtnObj.transform, false);
-            TextMeshProUGUI rTMP = rTxtObj.AddComponent<TextMeshProUGUI>();
-            rTMP.text = "RESTART";
-            rTMP.fontSize = 24;
-            rTMP.fontStyle = FontStyles.Bold;
-            rTMP.color = Color.white;
-            rTMP.alignment = TextAlignmentOptions.Center;
-            rTMP.textWrappingMode = TextWrappingModes.NoWrap;
-            rTMP.overflowMode = TextOverflowModes.Overflow;
-            RectTransform rtxtrt = rTxtObj.GetComponent<RectTransform>();
-            rtxtrt.anchorMin = Vector2.zero;
-            rtxtrt.anchorMax = Vector2.one;
-            rtxtrt.pivot = new Vector2(0.5f, 0.5f);
-            rtxtrt.anchoredPosition = Vector2.zero;
-            rtxtrt.sizeDelta = Vector2.zero;
-            rtxtrt.offsetMin = Vector2.zero;
-            rtxtrt.offsetMax = Vector2.zero;
-
-            // Exit Button
-            GameObject exitBtnObj = new GameObject("ExitButton");
-            exitBtnObj.transform.SetParent(goPanel.transform, false);
-            Image eImg = exitBtnObj.AddComponent<Image>();
-            eImg.color = new Color(0.85f, 0.25f, 0.2f);
-            Button eBtn = exitBtnObj.AddComponent<Button>();
-            RectTransform ert = exitBtnObj.GetComponent<RectTransform>();
-            ert.anchoredPosition = new Vector2(0, -130);
-            ert.sizeDelta = new Vector2(380, 58);
+            Button eBtn = CreateCyberPillButton(goPanel.transform, "ExitButton", new Vector2(158f, -34f), new Vector2(290f, 94f), longBtnSprite, exitSprite, "MAIN MENU", 22f, out _);
             goUI.exitButton = eBtn;
 
-            GameObject eTxtObj = new GameObject("ExitBtnText");
-            eTxtObj.transform.SetParent(exitBtnObj.transform, false);
-            TextMeshProUGUI eTMP = eTxtObj.AddComponent<TextMeshProUGUI>();
-            eTMP.text = "KEMBALI KE MAIN MENU";
-            eTMP.fontSize = 22;
-            eTMP.fontStyle = FontStyles.Bold;
-            eTMP.color = Color.white;
-            eTMP.alignment = TextAlignmentOptions.Center;
-            eTMP.textWrappingMode = TextWrappingModes.NoWrap;
-            eTMP.overflowMode = TextOverflowModes.Overflow;
-            RectTransform etxtrt = eTxtObj.GetComponent<RectTransform>();
-            etxtrt.anchorMin = Vector2.zero;
-            etxtrt.anchorMax = Vector2.one;
-            etxtrt.pivot = new Vector2(0.5f, 0.5f);
-            etxtrt.anchoredPosition = Vector2.zero;
-            etxtrt.sizeDelta = Vector2.zero;
-            etxtrt.offsetMin = Vector2.zero;
-            etxtrt.offsetMax = Vector2.zero;
+            // Row 2 Button: OPTION (Only exists when Game Over panel is active in GameScene!)
+            Button optBtn = CreateCyberPillButton(goPanel.transform, "OptionButton", new Vector2(0f, -132f), new Vector2(290f, 90f), longBtnSprite, settingSprite, "OPTION", 22f, out _);
+            goUI.optionButton = optBtn;
 
             goPanel.SetActive(false);
         }
@@ -738,12 +1249,28 @@ namespace DiepMultiplayer.Editor
         {
             EditorApplication.delayCall += () =>
             {
+                if (EditorApplication.isPlayingOrWillChangePlaymode)
+                    return;
+
                 if (!File.Exists("Assets/Resources/PlayerTank.prefab")
+                    || !File.Exists("Assets/Resources/OptionsOverlayPrefab.prefab")
                     || !File.Exists("Assets/Scenes/GameScene.unity")
                     || !File.Exists("Assets/Materials/TronCycleChassis.mat"))
                 {
-                    Debug.Log("[Tron Game] Menyiapkan Scene dan Prefab Tron Light Cycle secara otomatis...");
+                    Debug.Log("[Tron Game] Menyiapkan Scene, Prefab UI Cyber, dan Tron Light Cycle secara otomatis...");
                     DiepGameSetup.SetupAll();
+                    return;
+                }
+
+                GameObject playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Resources/PlayerTank.prefab");
+                GameObject botPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Resources/BotTank.prefab");
+                bool missingCarModel = (playerPrefab == null || playerPrefab.transform.Find("TronCycleVisual/CarModel") == null)
+                                    || (botPrefab == null || botPrefab.transform.Find("TronCycleVisual/CarModel") == null);
+
+                if (missingCarModel && (File.Exists("Assets/3D/Car Blue.fbx") || File.Exists("Assets/3D/Car Red.fbx")))
+                {
+                    Debug.Log("[Tron Game] Memperbarui prefab PlayerTank & BotTank menggunakan model 3D Car Blue & Car Red...");
+                    DiepGameSetup.SetupCarPrefabsOnly();
                 }
             };
         }

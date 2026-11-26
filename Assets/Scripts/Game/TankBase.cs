@@ -219,7 +219,11 @@ namespace DiepMultiplayer
             if (existingVisual != null)
             {
                 tronVisualRoot = existingVisual.gameObject;
-                ApplyNeonMaterialToVisual(tronVisualRoot.transform);
+                // Keep custom 3D Car FBX materials (Car.shader) intact; only recolor legacy primitive parts
+                if (existingVisual.Find("CarModel") == null)
+                {
+                    ApplyNeonMaterialToVisual(tronVisualRoot.transform);
+                }
             }
             else
             {
@@ -228,7 +232,7 @@ namespace DiepMultiplayer
 
             if (shieldBubble != null)
             {
-                shieldBubble.transform.localScale = new Vector3(2.1f, 2.0f, 3.0f);
+                shieldBubble.transform.localScale = new Vector3(2.2f, 1.8f, 3.4f);
             }
         }
 
@@ -531,9 +535,9 @@ namespace DiepMultiplayer
 
             if (spawnGraceTimer > 0f) return;
 
-            // 2. Check Overlap at Front Nose of Light Cycle
-            Vector3 nosePos = transform.position + moveDirection * 0.55f;
-            Collider[] hits = Physics.OverlapSphere(nosePos, 0.42f);
+            // 2. Check Overlap at Front Nose of Light Cycle / Car
+            Vector3 nosePos = transform.position + moveDirection * 0.85f;
+            Collider[] hits = Physics.OverlapSphere(nosePos, 0.45f);
             foreach (Collider hit in hits)
             {
                 if (hit == null) continue;
