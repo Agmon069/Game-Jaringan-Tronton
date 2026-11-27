@@ -325,6 +325,8 @@ namespace DiepMultiplayer
                 SoundManager.Instance.PlayExplosion(transform.position);
             }
 
+            TronExplosionVFX.SpawnCrash(transform.position, moveDirection, cycleNeonColor, 1.0f, false);
+
             // Hapus semua jejak cahaya milik bot yang mati
             ClearAllTrails();
             currentHealth = 0;
